@@ -10,10 +10,10 @@ parser = OptionParser(usage)
 parser.add_option("-x", "--bust-cache", action="store_true",
     help="refetch servers list from AWS")
 parser.add_option("-u", "--user", action="store",
-          dest="user", default="ubuntu",
-    help="provide user (default: ubuntu)")
+          dest="user", default="mhuber",
+    help="provide user (default: mhuber)")
 parser.add_option("-i", "--identity", action="store",
-          dest="identity", default="",
+          dest="identity", default="~/.ssh/mhuber.id_rsa",
     help="provide identity file")
 parser.add_option("-p", "--profile", action="store",
           dest="profile", default="",
@@ -128,7 +128,7 @@ with open(cache_file_num, 'w') as f:
   f.write(str(num))
 
 instance = all_instances[num - 1]
-dns = [instance['PublicDnsName'], instance['PrivateIpAddress']][options.ip]
+dns = [instance['PrivateIpAddress']][options.ip]
 
 identity = ''
 if options.identity and os.path.exists(options.identity):
