@@ -143,5 +143,9 @@ identity = ''
 if options.identity and os.path.exists(options.identity):
   identity = "-i %s " % options.identity
 
+user = ''
+if options.user:
+  user = options.user % "@"
+
 print "\nConnecting to", extract_name(instance), dns
-os.system('ssh %s%s@%s' % (identity, options.user, dns))
+os.system('ssh %s%s%s' % (identity, user, dns))
