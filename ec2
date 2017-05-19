@@ -10,10 +10,10 @@ parser = OptionParser(usage)
 parser.add_option("-x", "--bust-cache", action="store_true",
     help="refetch servers list from AWS")
 parser.add_option("-u", "--user", action="store",
-          dest="user", default="mhuber",
-    help="provide user (default: mhuber)")
+          dest="user", default="",
+    help="provide user")
 parser.add_option("-i", "--identity", action="store",
-          dest="identity", default="~/.ssh/mhuber.id_rsa",
+          dest="identity", default="",
     help="provide identity file")
 parser.add_option("-p", "--profile", action="store",
           dest="profile", default="",
@@ -27,6 +27,9 @@ parser.add_option("--ip", action="store",
 parser.add_option("-g", "--grep", action="store",
           dest="grep", default="",
     help="filter the server list")
+parser.add_option("-s", "--state", action="store",
+          dest="state", default="running",
+    help="choose instance state (default 'running'")
 (options, args) = parser.parse_args()
 
 cache_dir = os.environ.get('XDG_CACHE_HOME',
@@ -54,6 +57,9 @@ def extract_name(instance):
       if tag['Key'] == 'Name' and tag['Value']:
         return tag['Value']
   return '.'
+
+def extract_state(instance):
+  return instance["State"]["Name"]
 
 if options.bust_cache or not os.path.exists(cache_file_list) \
   or options.profile:
@@ -93,6 +99,9 @@ for instances in parsed['Reservations']:
 
 if options.grep:
   all_instances = [inst for inst in all_instances if options.grep.lower() in extract_name(inst).lower()]
+
+if options.state:
+  all_instances = [inst for inst in all_instances if options.state in extract_state(inst)]
 
 all_instances = sorted(all_instances, key = lambda k: extract_name(k))
 
