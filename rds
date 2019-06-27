@@ -1,0 +1,179 @@
+#!/usr/bin/env python
+import subprocess, json, os
+from optparse import OptionParser
+
+usage = "usage: %prog [options] [server_number]\n\
+  server_number: a numeric value corresponding to the instance number\n\
+  e.g.: '%prog 1' will connect into the 1st server in the list."
+
+parser = OptionParser(usage)
+parser.add_option("-x", "--bust-cache", action="store_true",
+    help="refetch servers list from AWS")
+parser.add_option("-u", "--user", action="store",
+          dest="user", default="root",
+    help="provide user")
+#parser.add_option("-i", "--identity", action="store",
+#          dest="identity", default="",
+#    help="provide identity file")
+parser.add_option("-p", "--profile", action="store",
+          dest="profile", default="",
+    help="provide AWS profile")
+parser.add_option("-r", "--region", action="store",
+          dest="region", default="",
+    help="provide AWS region")
+parser.add_option("--ip", action="store",
+          dest="ip", default=0,
+    help="connect using IP instead of DNS")
+parser.add_option("-g", "--grep", action="store",
+          dest="grep", default="",
+    help="filter the server list")
+#parser.add_option("-s", "--state", action="store",
+#          dest="state", default="running",
+#    help="choose instance state (default 'running'")
+(options, args) = parser.parse_args()
+
+cache_dir = os.environ.get('XDG_CACHE_HOME',
+  os.path.join(os.path.expanduser('~'), '.cache'))
+if not os.path.exists(cache_dir):
+  os.makedirs(cache_dir)
+if options.region:
+  cache_file_list = os.path.join(cache_dir, 'rds_list_' + options.region)
+  cache_file_num = os.path.join(cache_dir, 'rds_num_' + options.region)
+else:
+  cache_file_list = os.path.join(cache_dir, 'rds_list')
+  cache_file_num = os.path.join(cache_dir, 'rds_num')
+
+num = ''
+if args:
+  if not args[0].isdigit():
+    print "'server_number' must be a numeric value"
+    exit()
+  num = int(args[0])
+
+
+def extract_name(instance):
+  return instance['DBInstanceIdentifier']
+
+#def extract_state(instance):
+#  return instance["State"]["Name"]
+
+if options.bust_cache or not os.path.exists(cache_file_list) \
+  or options.profile:
+
+  print "Fetching databases..."
+  if os.path.exists(cache_file_num):
+    os.remove(cache_file_num)
+  rds_cmd = "aws rds describe-db-instances --output json"
+  if options.profile:
+    rds_cmd += ' --profile ' + options.profile
+  if options.region:
+    rds_cmd += ' --region ' + options.region
+
+  child = subprocess.Popen(rds_cmd,
+    shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+  output = child.stdout.read()
+  error = child.stderr.read()
+  if error:
+    print error
+    print 'Unable to fetch any servers.'
+    exit()
+  with open(cache_file_list, 'w') as f:
+    f.write(output)
+
+output = open(cache_file_list).read()
+parsed = json.loads(output)
+
+all_instances = []
+if not parsed['DBInstances']:
+  print 'Coult not find any servers.'
+  if os.path.exists(cache_file_list):
+    os.remove(cache_file_list)
+  exit()
+for instances in parsed['DBInstances']:
+    all_instances.append(instances)
+
+if options.grep:
+  all_instances = [inst for inst in all_instances if options.grep.lower() in extract_name(inst).lower()]
+
+#if options.state:
+#  all_instances = [inst for inst in all_instances if options.state in extract_state(inst)]
+
+#all_instances = sorted(all_instances, key = lambda k: extract_name(k))
+
+if not num:
+  print "\nDatabase list:\n"
+  for i, instance in enumerate(all_instances, 1):
+    choice = '[%d]' % i
+    #name = extract_name(instance)
+    #print '%-4s %-35s %-55s' % (choice, name + (35 - len(name)) * '.', instance['PublicDnsName'])
+    print '%-4s %-60s' % (choice, instance['Endpoint']['Address'])
+
+default_num = 1
+if os.path.exists(cache_file_num):
+  default_num = open(cache_file_num).read()
+ok = not not num
+while not ok or not num:
+  try:
+    num = raw_input("\nWhich database would you like to connect to [" +
+            str(default_num) + "]? ")
+    if not num:
+      num = int(default_num)
+      break
+    ok = num.isdigit() and 1 <= int(num) <= i
+    if ok:
+      num = int(num)
+      break
+    print "ERR: please enter a value between 1 and " + str(i)
+  except (EOFError, KeyboardInterrupt) as e:
+    print "\nExiting..."
+    exit()
+
+with open(cache_file_num, 'w') as f:
+  f.write(str(num))
+
+instance = all_instances[num - 1]
+
+#identity = ''
+#if options.identity and os.path.exists(options.identity):
+#  identity = "-i %s " % options.identity
+
+user = ''
+if options.user:
+  user = options.user 
+
+## get environment from name
+envname = extract_name(instance).split("-")
+env = envname[0].strip()
+if env == "stg":
+  env = "stage"
+
+aws_cmd = 'aws ec2 describe-instances --filters "Name=tag:Name,Values=%s-MISC*" --query \'Reservations[*].Instances[*].PrivateIpAddress\' --output text' % (env.upper())
+if options.profile:
+  aws_cmd += ' --profile ' + options.profile
+if options.region:
+  aws_cmd += ' --region ' + options.region
+
+child = subprocess.Popen(aws_cmd,
+  shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+output = child.stdout.read()
+error = child.stderr.read()
+if error:
+  print error
+  print 'Unable to fetch any servers.'
+  exit()
+#with open(cache_file_list, 'w') as f:
+#  f.write(output)
+
+miscsvr = output.strip()
+print "miscsvr = '" + miscsvr + "'"
+
+from random import randint
+lport = randint(30001,39999)
+print "lport = '" + str(lport) + "'"
+
+print "\nConnecting to " + extract_name(instance) + " via " + miscsvr +  ":" + str(lport)
+#cmd_mysql = 'ssh -f -o ExitOnForwardFailure=yes -L %s:%s:%s %s sleep 10; mysql -u %s -p -h localhost -P %s' % (lport, miscsvr, instance['Endpoint']['Port'], insinstance['Endpoint']['Port'], instance['Endpoint']['Port'], instance['Endpoint']['Port'], tance['Endpoint']['Address'], user, lport)
+cmd_mysql = 'mysql -u %s -p -h %s -P %s' % (user, instance['Endpoint']['Address'], instance['Endpoint']['Port'])
+#print "cmd_mysql = '" + cmd_mysql + "'"
+#os.system(cmd_mysql)
+
